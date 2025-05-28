@@ -58,6 +58,7 @@ export const useGameState = () => {
     const virusProjectilesMap = useRef<Map<number, VirusProjectile>>(new Map());
     const otherPlayersMap = useRef<Map<string, OtherPlayer>>(new Map());
     const playerIdRef = useRef<string | null>(null);
+    const consumedEjectedIds = useRef<Set<number>>(new Set()); // Track consumed ejected to prevent multiple requests
 
     const initializeGame = useCallback(() => {
         // Initialize WebSocket connection
@@ -225,6 +226,100 @@ export const useGameState = () => {
                     // On other player ejected
                     (ejected) => {
                         gameState.current.otherPlayerEjected = ejected;
+                    },
+                    // On player consumed
+                    (targetId, targetType, consumerId, newMass, gainedMass, consumingEntityType, consumingEntityIndex) => {
+                        if (targetType === 'player') {
+                            // Check if I was the one consumed
+                            if (targetId === playerIdRef.current) {
+                                // I was eaten! Reset my player
+                                console.log('I was eaten! Respawning...');
+                                gameState.current.player.mass = START_MASS;
+                                gameState.current.player.radius = radiusFromMass(START_MASS);
+                                gameState.current.player.x = WORLD_SIZE / 2 + (Math.random() - 0.5) * 1000;
+                                gameState.current.player.y = WORLD_SIZE / 2 + (Math.random() - 0.5) * 1000;
+                                gameState.current.splits = [];
+                                gameState.current.ejected = [];
+                                return;
+                            }
+                            
+                            // Check if I was the consumer - update mass
+                            if (consumerId === playerIdRef.current && newMass) {
+                                if (consumingEntityType === 'player') {
+                                    // Update main player mass
+                                    gameState.current.player.mass = newMass;
+                                    gameState.current.player.radius = radiusFromMass(newMass);
+                                    console.log(`Main player consumed player! Gained ${gainedMass} mass. New mass: ${newMass}`);
+                                } else if (consumingEntityType === 'split' && consumingEntityIndex !== undefined && consumingEntityIndex >= 0) {
+                                    // Update specific split mass
+                                    const split = gameState.current.splits[consumingEntityIndex];
+                                    if (split) {
+                                        split.mass = newMass;
+                                        console.log(`Split ${consumingEntityIndex} consumed player! Gained ${gainedMass} mass. New mass: ${newMass}`);
+                                    }
+                                }
+                            }
+                            
+                            // Remove consumed player from otherPlayers
+                            otherPlayersMap.current.delete(targetId);
+                            gameState.current.otherPlayers = Array.from(otherPlayersMap.current.values());
+                            // Remove their splits and ejected
+                            gameState.current.otherPlayerSplits = gameState.current.otherPlayerSplits.filter(s => s.playerId !== targetId);
+                            gameState.current.otherPlayerEjected = gameState.current.otherPlayerEjected.filter(e => e.playerId !== targetId);
+                        } else if (targetType === 'split') {
+                            // Check if I was the consumer - update mass
+                            if (consumerId === playerIdRef.current && newMass) {
+                                if (consumingEntityType === 'player') {
+                                    // Update main player mass
+                                    gameState.current.player.mass = newMass;
+                                    gameState.current.player.radius = radiusFromMass(newMass);
+                                    console.log(`Main player consumed split! Gained ${gainedMass} mass. New mass: ${newMass}`);
+                                } else if (consumingEntityType === 'split' && consumingEntityIndex !== undefined && consumingEntityIndex >= 0) {
+                                    // Update specific split mass
+                                    const split = gameState.current.splits[consumingEntityIndex];
+                                    if (split) {
+                                        split.mass = newMass;
+                                        console.log(`Split ${consumingEntityIndex} consumed split! Gained ${gainedMass} mass. New mass: ${newMass}`);
+                                    }
+                                }
+                            }
+                            
+                            // Remove consumed split
+                            const splitId = parseInt(targetId);
+                            gameState.current.otherPlayerSplits = gameState.current.otherPlayerSplits.filter(s => s.id !== splitId);
+                        }
+                    },
+                    // On other ejected consumed
+                    (ejectedId, consumerId, newMass, gainedMass, consumingEntityType, consumingEntityIndex, originalOwnerId) => {
+                        // Check if I was the consumer - update mass
+                        if (consumerId === playerIdRef.current && newMass) {
+                            if (consumingEntityType === 'player') {
+                                // Update main player mass
+                                gameState.current.player.mass = newMass;
+                                gameState.current.player.radius = radiusFromMass(newMass);
+                                console.log(`Main player consumed ejected! Gained ${gainedMass} mass. New mass: ${newMass}`);
+                            } else if (consumingEntityType === 'split' && consumingEntityIndex !== undefined && consumingEntityIndex >= 0) {
+                                // Update specific split mass
+                                const split = gameState.current.splits[consumingEntityIndex];
+                                if (split) {
+                                    split.mass = newMass;
+                                    console.log(`Split ${consumingEntityIndex} consumed ejected! Gained ${gainedMass} mass. New mass: ${newMass}`);
+                                }
+                            }
+                        }
+                        
+                        // CRITICAL FIX: If I'm the original owner, clear my ejected array
+                        if (originalOwnerId === playerIdRef.current) {
+                            // Clear all my ejected masses to prevent re-adding consumed ones
+                            gameState.current.ejected = [];
+                            console.log(`Cleared my ejected array because someone consumed my ejected mass`);
+                        }
+                        
+                        // Remove consumed ejected mass from otherPlayerEjected array (for all clients)
+                        gameState.current.otherPlayerEjected = gameState.current.otherPlayerEjected.filter(e => e.id !== ejectedId);
+                        
+                        // Remove from consumed tracking set
+                        consumedEjectedIds.current.delete(ejectedId);
                     }
                 );
             }, 100);
@@ -246,6 +341,64 @@ export const useGameState = () => {
     const consumeVirus = useCallback((virusId: number) => {
         if (wsService.current) {
             wsService.current.consumeVirus(virusId);
+        }
+    }, []);
+
+    const consumePlayer = useCallback((targetId: string, targetType: 'player' | 'split', consumingEntityType?: 'player' | 'split', consumingEntityIndex?: number) => {
+        if (wsService.current) {
+            // Get the consuming entity's position and mass for server validation
+            let consumingEntity = null;
+            if (consumingEntityType === 'player') {
+                consumingEntity = {
+                    x: gameState.current.player.x,
+                    y: gameState.current.player.y,
+                    mass: gameState.current.player.mass
+                };
+            } else if (consumingEntityType === 'split' && consumingEntityIndex !== undefined && consumingEntityIndex >= 0) {
+                const split = gameState.current.splits[consumingEntityIndex];
+                if (split) {
+                    consumingEntity = {
+                        x: split.x,
+                        y: split.y,
+                        mass: split.mass
+                    };
+                }
+            }
+            
+            wsService.current.consumePlayer(targetId, targetType, consumingEntityType, consumingEntityIndex, consumingEntity);
+        }
+    }, []);
+
+    const consumeOtherEjected = useCallback((ejectedId: number, consumingEntityType?: 'player' | 'split', consumingEntityIndex?: number) => {
+        if (wsService.current) {
+            // Check if this ejected mass has already been consumed
+            if (consumedEjectedIds.current.has(ejectedId)) {
+                return; // Already consumed, don't send duplicate request
+            }
+            
+            // Mark as consumed to prevent duplicate requests
+            consumedEjectedIds.current.add(ejectedId);
+            
+            // Get the consuming entity's position and mass for server validation
+            let consumingEntity = null;
+            if (consumingEntityType === 'player') {
+                consumingEntity = {
+                    x: gameState.current.player.x,
+                    y: gameState.current.player.y,
+                    mass: gameState.current.player.mass
+                };
+            } else if (consumingEntityType === 'split' && consumingEntityIndex !== undefined && consumingEntityIndex >= 0) {
+                const split = gameState.current.splits[consumingEntityIndex];
+                if (split) {
+                    consumingEntity = {
+                        x: split.x,
+                        y: split.y,
+                        mass: split.mass
+                    };
+                }
+            }
+            
+            wsService.current.consumeOtherEjected(ejectedId, consumingEntityType, consumingEntityIndex, consumingEntity);
         }
     }, []);
 
@@ -278,6 +431,10 @@ export const useGameState = () => {
                 gameState.current.ejected
             );
         }
+    }, []);
+
+    const getMyPlayerId = useCallback(() => {
+        return playerIdRef.current || '';
     }, []);
 
     const getAllEntities = useCallback((): Entity[] => {
@@ -423,7 +580,10 @@ export const useGameState = () => {
         consumePellet,
         feedVirus,
         consumeVirus,
+        consumePlayer,
+        consumeOtherEjected,
         sendPlayerUpdate,
+        getMyPlayerId,
         getWorldSize: () => WORLD_SIZE,
         getGridSize: () => GRID_SIZE,
         getVirusExplodeThreshold: () => VIRUS_EXPLODE_THRESHOLD,

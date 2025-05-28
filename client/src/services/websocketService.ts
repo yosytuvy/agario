@@ -58,7 +58,6 @@ interface ServerVirusProjectile {
 export class WebSocketService {
     private ws: WebSocket | null = null;
     private reconnectInterval: number | null = null;
-    private playerId: string | null = null;
     private lastUpdateTime: number = 0;
     private updateInterval: number = 50; // Send updates every 50ms
     
@@ -78,6 +77,8 @@ export class WebSocketService {
     private onPlayerUpdate: ((playerId: string, x: number, y: number, mass: number, radius: number, color?: string) => void) | null = null;
     private onOtherPlayerSplitsReceived: ((splits: OtherPlayerSplit[]) => void) | null = null;
     private onOtherPlayerEjectedReceived: ((ejected: OtherPlayerEjected[]) => void) | null = null;
+    private onPlayerConsumed: ((targetId: string, targetType: 'player' | 'split', consumerId?: string, newMass?: number, gainedMass?: number, consumingEntityType?: string, consumingEntityIndex?: number) => void) | null = null;
+    private onOtherEjectedConsumed: ((ejectedId: number, consumerId?: string, newMass?: number, gainedMass?: number, consumingEntityType?: string, consumingEntityIndex?: number, originalOwnerId?: string) => void) | null = null;
 
     constructor(
         private url: string = 'ws://localhost:8000/ws'
@@ -98,7 +99,9 @@ export class WebSocketService {
         onPlayerLeft: (playerId: string) => void,
         onPlayerUpdate: (playerId: string, x: number, y: number, mass: number, radius: number, color?: string) => void,
         onOtherPlayerSplits: (splits: OtherPlayerSplit[]) => void,
-        onOtherPlayerEjected: (ejected: OtherPlayerEjected[]) => void
+        onOtherPlayerEjected: (ejected: OtherPlayerEjected[]) => void,
+        onPlayerConsumed: (targetId: string, targetType: 'player' | 'split', consumerId?: string, newMass?: number, gainedMass?: number, consumingEntityType?: string, consumingEntityIndex?: number) => void,
+        onOtherEjectedConsumed: (ejectedId: number, consumerId?: string, newMass?: number, gainedMass?: number, consumingEntityType?: string, consumingEntityIndex?: number, originalOwnerId?: string) => void
     ) {
         this.onConfigReceived = onConfig;
         this.onPlayerIdReceived = onPlayerId;
@@ -115,6 +118,8 @@ export class WebSocketService {
         this.onPlayerUpdate = onPlayerUpdate;
         this.onOtherPlayerSplitsReceived = onOtherPlayerSplits;
         this.onOtherPlayerEjectedReceived = onOtherPlayerEjected;
+        this.onPlayerConsumed = onPlayerConsumed;
+        this.onOtherEjectedConsumed = onOtherEjectedConsumed;
 
         console.log('Attempting to connect to:', this.url);
         
@@ -151,7 +156,6 @@ export class WebSocketService {
     private handleMessage(data: any) {
         switch (data.type) {
             case 'init':
-                this.playerId = data.playerId;
                 if (this.onPlayerIdReceived) {
                     this.onPlayerIdReceived(data.playerId);
                 }
@@ -249,6 +253,18 @@ export class WebSocketService {
                     this.onProjectileUpdates(data.updates);
                 }
                 break;
+            
+            case 'player_consumed':
+                if (this.onPlayerConsumed) {
+                    this.onPlayerConsumed(data.targetId, data.targetType, data.consumerId, data.newMass, data.gainedMass, data.consumingEntityType, data.consumingEntityIndex);
+                }
+                break;
+            
+            case 'other_ejected_consumed':
+                if (this.onOtherEjectedConsumed) {
+                    this.onOtherEjectedConsumed(data.ejectedId, data.consumerId, data.newMass, data.gainedMass, data.consumingEntityType, data.consumingEntityIndex, data.originalOwnerId);
+                }
+                break;
         }
     }
 
@@ -320,6 +336,31 @@ export class WebSocketService {
         }
     }
 
+    consumePlayer(targetId: string, targetType: 'player' | 'split', consumingEntityType?: 'player' | 'split', consumingEntityIndex?: number, consumingEntity?: {x: number, y: number, mass: number}) {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify({
+                type: 'consume_player',
+                targetId: targetId,
+                targetType: targetType,
+                consumingEntityType: consumingEntityType || 'player',
+                consumingEntityIndex: consumingEntityIndex || -1,
+                consumingEntity: consumingEntity
+            }));
+        }
+    }
+
+    consumeOtherEjected(ejectedId: number, consumingEntityType?: 'player' | 'split', consumingEntityIndex?: number, consumingEntity?: {x: number, y: number, mass: number}) {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify({
+                type: 'consume_other_ejected',
+                ejectedId: ejectedId,
+                consumingEntityType: consumingEntityType || 'player',
+                consumingEntityIndex: consumingEntityIndex || -1,
+                consumingEntity: consumingEntity
+            }));
+        }
+    }
+
     private attemptReconnect() {
         if (!this.reconnectInterval) {
             this.reconnectInterval = window.setInterval(() => {
@@ -339,7 +380,9 @@ export class WebSocketService {
                     this.onPlayerLeft!,
                     this.onPlayerUpdate!,
                     this.onOtherPlayerSplitsReceived!,
-                    this.onOtherPlayerEjectedReceived!
+                    this.onOtherPlayerEjectedReceived!,
+                    this.onPlayerConsumed!,
+                    this.onOtherEjectedConsumed!
                 );
             }, 3000);
         }

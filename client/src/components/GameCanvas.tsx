@@ -26,6 +26,8 @@ const GameCanvas: React.FC = () => {
         consumePellet,
         feedVirus,
         consumeVirus,
+        consumePlayer,
+        consumeOtherEjected,
         sendPlayerUpdate,
         getWorldSize,
         getGridSize,
@@ -41,7 +43,8 @@ const GameCanvas: React.FC = () => {
         getSplitSpeed,
         getSplitFlightDuration,
         getMergeSpeed,
-        getDecayRate
+        getDecayRate,
+        getMyPlayerId
     } = useGameState();
 
     useEffect(() => {
@@ -181,6 +184,26 @@ const GameCanvas: React.FC = () => {
                 consumeVirus
             );
             gameState.splits.push(...virusExplosionPieces);
+
+            // NEW: Check player vs other players collisions
+            CollisionDetection.checkPlayerVsOtherPlayersCollisions(
+                gameState.player,
+                gameState.splits,
+                gameState.otherPlayers,
+                gameState.otherPlayerSplits,
+                getMyPlayerId(),
+                (targetId, targetType, consumingEntityType, consumingEntityIndex) => 
+                    consumePlayer(targetId, targetType, consumingEntityType, consumingEntityIndex)
+            );
+
+            // NEW: Check player vs other players' ejected mass collisions
+            CollisionDetection.checkPlayerVsOtherEjectedCollisions(
+                gameState.player,
+                gameState.splits,
+                gameState.otherPlayerEjected,
+                (ejectedId, consumingEntityType, consumingEntityIndex) => 
+                    consumeOtherEjected(ejectedId, consumingEntityType, consumingEntityIndex)
+            );
 
             // Render all entities
             const allEntities = getAllEntities();

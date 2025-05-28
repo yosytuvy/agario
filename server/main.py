@@ -410,6 +410,198 @@ class GameState:
             }
         return None
     
+    def consume_player(self, consumer_id: str, target_id: str, target_type: str, consuming_entity_type: str = 'player', consuming_entity_index: int = -1, consuming_entity_data: dict = None):
+        """Handle player consuming another player or split"""
+        # Validate the consumer exists
+        if consumer_id not in self.players:
+            return None
+        
+        consumer = self.players[consumer_id]
+        
+        # Get the consuming entity (either main player or a specific split)
+        consuming_entity = None
+        consuming_mass = 0
+        consuming_x = 0
+        consuming_y = 0
+        
+        if consuming_entity_type == 'player':
+            consuming_entity = consumer
+            consuming_mass = consumer.mass
+            consuming_x = consumer.x
+            consuming_y = consumer.y
+        elif consuming_entity_type == 'split' and consuming_entity_data:
+            # Use the data sent from client for validation
+            consuming_mass = consuming_entity_data.get('mass', 0)
+            consuming_x = consuming_entity_data.get('x', 0)
+            consuming_y = consuming_entity_data.get('y', 0)
+        else:
+            return None
+        
+        if target_type == 'player':
+            # Check if target player exists
+            if target_id not in self.players:
+                return None
+            
+            target = self.players[target_id]
+            
+            # Validate 10% size advantage
+            if consuming_mass < target.mass * 1.1:
+                return None
+            
+            # Calculate distance to validate collision
+            distance = math.hypot(consuming_x - target.x, consuming_y - target.y)
+            consuming_radius = PELLET_RADIUS * math.sqrt(consuming_mass)
+            if distance >= consuming_radius:
+                return None
+            
+            # Add mass to the appropriate entity
+            gained_mass = target.mass
+            
+            if consuming_entity_type == 'player':
+                # Add to main player
+                consumer.mass += gained_mass
+                consumer.radius = PELLET_RADIUS * math.sqrt(consumer.mass)
+                new_mass = consumer.mass
+            else:
+                # Add to the consuming split - we'll let the client handle this
+                # since splits are primarily managed client-side
+                new_mass = consuming_mass + gained_mass
+            
+            # Remove target player and all their splits/ejected
+            del self.players[target_id]
+            
+            # Remove target's splits
+            splits_to_remove = [id for id, split in self.player_splits.items() if split.playerId == target_id]
+            for split_id in splits_to_remove:
+                del self.player_splits[split_id]
+            
+            # Remove target's ejected mass
+            ejected_to_remove = [id for id, ej in self.player_ejected.items() if ej.playerId == target_id]
+            for ej_id in ejected_to_remove:
+                del self.player_ejected[ej_id]
+            
+            return {
+                "targetId": target_id,
+                "targetType": "player",
+                "gainedMass": gained_mass,
+                "consumerId": consumer_id,
+                "newMass": new_mass,
+                "consumingEntityType": consuming_entity_type,
+                "consumingEntityIndex": consuming_entity_index
+            }
+        
+        elif target_type == 'split':
+            # Find the target split
+            target_split_id = int(target_id)
+            if target_split_id not in self.player_splits:
+                return None
+            
+            target_split = self.player_splits[target_split_id]
+            
+            # Validate 10% size advantage
+            if consuming_mass < target_split.mass * 1.1:
+                return None
+            
+            # Calculate distance to validate collision
+            distance = math.hypot(consuming_x - target_split.x, consuming_y - target_split.y)
+            consuming_radius = PELLET_RADIUS * math.sqrt(consuming_mass)
+            if distance >= consuming_radius:
+                return None
+            
+            # Add mass to the appropriate entity
+            gained_mass = target_split.mass
+            
+            if consuming_entity_type == 'player':
+                # Add to main player
+                consumer.mass += gained_mass
+                consumer.radius = PELLET_RADIUS * math.sqrt(consumer.mass)
+                new_mass = consumer.mass
+            else:
+                # Add to the consuming split - we'll let the client handle this
+                # since splits are primarily managed client-side
+                new_mass = consuming_mass + gained_mass
+            
+            # Remove the split
+            del self.player_splits[target_split_id]
+            
+            return {
+                "targetId": target_id,
+                "targetType": "split",
+                "gainedMass": gained_mass,
+                "consumerId": consumer_id,
+                "newMass": new_mass,
+                "consumingEntityType": consuming_entity_type,
+                "consumingEntityIndex": consuming_entity_index
+            }
+        
+        return None
+    
+    def consume_other_ejected(self, consumer_id: str, ejected_id: int, consuming_entity_type: str = 'player', consuming_entity_index: int = -1, consuming_entity_data: dict = None):
+        """Handle player consuming other players' ejected mass"""
+        # Validate the consumer exists
+        if consumer_id not in self.players:
+            return None
+        
+        # Find the target ejected mass
+        if ejected_id not in self.player_ejected:
+            return None
+        
+        target_ejected = self.player_ejected[ejected_id]
+        
+        # Make sure it's not the consumer's own ejected mass
+        if target_ejected.playerId == consumer_id:
+            return None
+        
+        consumer = self.players[consumer_id]
+        
+        # Get consuming entity data for validation
+        consuming_x = 0
+        consuming_y = 0
+        consuming_radius = 0
+        
+        if consuming_entity_type == 'player':
+            consuming_x = consumer.x
+            consuming_y = consumer.y
+            consuming_radius = consumer.radius
+        elif consuming_entity_type == 'split' and consuming_entity_data:
+            consuming_x = consuming_entity_data.get('x', 0)
+            consuming_y = consuming_entity_data.get('y', 0)
+            consuming_mass = consuming_entity_data.get('mass', 0)
+            consuming_radius = PELLET_RADIUS * math.sqrt(consuming_mass)
+        else:
+            return None
+        
+        # Calculate distance to validate collision
+        distance = math.hypot(consuming_x - target_ejected.x, consuming_y - target_ejected.y)
+        if distance >= consuming_radius:
+            return None
+        
+        # ALWAYS give exactly EJECT_MASS_GAIN (13) mass for ejected parts
+        gained_mass = EJECT_MASS_GAIN
+        
+        # Remove the ejected mass FIRST to prevent double consumption
+        del self.player_ejected[ejected_id]
+        
+        if consuming_entity_type == 'player':
+            # Add to main player
+            consumer.mass += gained_mass
+            consumer.radius = PELLET_RADIUS * math.sqrt(consumer.mass)
+            new_mass = consumer.mass
+        else:
+            # For splits, calculate new mass from client data + gained mass
+            current_split_mass = consuming_entity_data.get('mass', 0)
+            new_mass = current_split_mass + gained_mass
+        
+        return {
+            "ejectedId": ejected_id,
+            "gainedMass": gained_mass,
+            "consumerId": consumer_id,
+            "newMass": new_mass,
+            "consumingEntityType": consuming_entity_type,
+            "consumingEntityIndex": consuming_entity_index,
+            "originalOwnerId": target_ejected.playerId  # Include original owner ID
+        }
+    
     async def update_virus_projectiles(self, dt: float):
         """Update virus projectile positions"""
         updates = []
@@ -659,6 +851,74 @@ async def websocket_endpoint(websocket: WebSocket):
                         "type": "virus_update",
                         "consumed": result["consumed"],
                         "spawned": result["spawned"]
+                    }
+                    
+                    for client in game_state.connected_clients:
+                        try:
+                            await client.send_json(update_message)
+                        except:
+                            pass
+            
+            elif data["type"] == "consume_player":
+                target_id = data["targetId"]
+                target_type = data["targetType"]
+                consuming_entity_type = data.get("consumingEntityType", "player")
+                consuming_entity_index = data.get("consumingEntityIndex", -1)
+                consuming_entity_data = data.get("consumingEntity")
+                
+                result = game_state.consume_player(
+                    player_id, 
+                    target_id, 
+                    target_type, 
+                    consuming_entity_type, 
+                    consuming_entity_index, 
+                    consuming_entity_data
+                )
+                
+                if result:
+                    # Broadcast player consumption to all connected clients
+                    update_message = {
+                        "type": "player_consumed",
+                        "targetId": result["targetId"],
+                        "targetType": result["targetType"],
+                        "consumerId": result["consumerId"],
+                        "newMass": result["newMass"],
+                        "gainedMass": result["gainedMass"],
+                        "consumingEntityType": result["consumingEntityType"],
+                        "consumingEntityIndex": result["consumingEntityIndex"]
+                    }
+                    
+                    for client in game_state.connected_clients:
+                        try:
+                            await client.send_json(update_message)
+                        except:
+                            pass
+            
+            elif data["type"] == "consume_other_ejected":
+                ejected_id = data["ejectedId"]
+                consuming_entity_type = data.get("consumingEntityType", "player")
+                consuming_entity_index = data.get("consumingEntityIndex", -1)
+                consuming_entity_data = data.get("consumingEntity")
+                
+                result = game_state.consume_other_ejected(
+                    player_id, 
+                    ejected_id, 
+                    consuming_entity_type, 
+                    consuming_entity_index, 
+                    consuming_entity_data
+                )
+                
+                if result:
+                    # Broadcast ejected consumption to all connected clients
+                    update_message = {
+                        "type": "other_ejected_consumed",
+                        "ejectedId": result["ejectedId"],
+                        "consumerId": result["consumerId"],
+                        "newMass": result["newMass"],
+                        "gainedMass": result["gainedMass"],
+                        "consumingEntityType": result["consumingEntityType"],
+                        "consumingEntityIndex": result["consumingEntityIndex"],
+                        "originalOwnerId": result["originalOwnerId"]  # Add original owner ID
                     }
                     
                     for client in game_state.connected_clients:
