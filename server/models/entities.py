@@ -2,7 +2,7 @@
 """Game entity models and data classes."""
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Union
 
 
 @dataclass
@@ -21,7 +21,7 @@ class Player:
 class PlayerSplit:
     """Represents a split part of a player."""
 
-    id: int
+    id: Union[str, int]  # Can be either string (new) or int (legacy)
     playerId: str
     x: float
     y: float
