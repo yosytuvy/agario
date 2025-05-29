@@ -22,8 +22,9 @@ export class CollisionDetection {
 			for (let i = 0; i < splits.length; i++) {
 				const s = splits[i];
 				if (nowTs - s.born < s.mergeDelay) {
-					const rS = radiusFromMass(s.mass);
-					const rP = player.radius;
+					// Use visual mass for collision boundaries during animation
+					const rS = radiusFromMass(s.visualMass);
+					const rP = player.radius; // Already uses visual mass
 					const dx = s.x - player.x;
 					const dy = s.y - player.y;
 					let d = Math.hypot(dx, dy);
@@ -45,12 +46,12 @@ export class CollisionDetection {
 			// Handle collisions between split blobs themselves
 			for (let i = 0; i < splits.length; i++) {
 				const s1 = splits[i];
-				const r1 = radiusFromMass(s1.mass);
+				const r1 = radiusFromMass(s1.visualMass); // Use visual mass for boundaries
 				const s1CannotMerge = nowTs - s1.born < s1.mergeDelay;
 
 				for (let j = i + 1; j < splits.length; j++) {
 					const s2 = splits[j];
-					const r2 = radiusFromMass(s2.mass);
+					const r2 = radiusFromMass(s2.visualMass); // Use visual mass for boundaries
 					const s2CannotMerge = nowTs - s2.born < s2.mergeDelay;
 
 					if (s1CannotMerge || s2CannotMerge) {
@@ -93,10 +94,11 @@ export class CollisionDetection {
 			const pel = pellets[i];
 			let eaten = false;
 
-			// Check collision with main player
+			// Check collision with main player (use visual radius for collision)
 			if (distance(pel.x, pel.y, player.x, player.y) < player.radius) {
 				player.mass += pel.mass;
-				onPelletConsumed(pel.id); // Notify server
+				// Don't update visualMass - let PlayerManager handle smooth growth
+				onPelletConsumed(pel.id);
 				eaten = true;
 			}
 
@@ -104,10 +106,11 @@ export class CollisionDetection {
 			if (!eaten) {
 				for (let j = 0; j < splits.length; j++) {
 					const s = splits[j];
-					const splitRadius = radiusFromMass(s.mass);
+					const splitRadius = radiusFromMass(s.visualMass); // Use visual radius for collision
 					if (distance(pel.x, pel.y, s.x, s.y) < splitRadius) {
 						s.mass += pel.mass;
-						onPelletConsumed(pel.id); // Notify server
+						// Don't update visualMass - let SplitBlobManager handle smooth growth
+						onPelletConsumed(pel.id);
 						eaten = true;
 						break;
 					}
@@ -133,7 +136,7 @@ export class CollisionDetection {
 				const virusRadius = radiusFromMass(virus.mass);
 				if (distance(p.x, p.y, virus.x, virus.y) < virusRadius) {
 					const angle = Math.atan2(virus.y - p.y, virus.x - p.x);
-					onVirusFeed(virus.id, angle); // Notify server
+					onVirusFeed(virus.id, angle);
 
 					ejected.splice(i, 1);
 					eaten = true;
@@ -141,9 +144,10 @@ export class CollisionDetection {
 				}
 			}
 
-			// Check collision with main player
+			// Check collision with main player (use visual radius)
 			if (!eaten && distance(p.x, p.y, player.x, player.y) < player.radius) {
 				player.mass += p.mass;
+				// Don't update visualMass - let PlayerManager handle smooth growth
 				ejected.splice(i, 1);
 				eaten = true;
 			}
@@ -152,9 +156,10 @@ export class CollisionDetection {
 			if (!eaten) {
 				for (let j = 0; j < splits.length; j++) {
 					const s = splits[j];
-					const splitRadius = radiusFromMass(s.mass);
+					const splitRadius = radiusFromMass(s.visualMass); // Use visual radius
 					if (distance(p.x, p.y, s.x, s.y) < splitRadius) {
 						s.mass += p.mass;
+						// Don't update visualMass - let SplitBlobManager handle smooth growth
 						ejected.splice(i, 1);
 						eaten = true;
 						break;
@@ -178,13 +183,13 @@ export class CollisionDetection {
 		) => void
 	): void {
 		// Check if main player can eat other players
+		// Use ACTUAL mass for consumption logic, not visual mass
 		for (const otherPlayer of otherPlayers) {
-			if (player.mass >= otherPlayer.mass * 1.1) {
+			if (player.mass >= otherPlayer.mass * 1.1) { // Use actual mass for logic
 				const dist = distance(player.x, player.y, otherPlayer.x, otherPlayer.y);
-				if (dist < player.radius) {
-					// DON'T add mass here - let server handle it to avoid double mass
+				if (dist < player.radius) { // Use visual radius for collision
 					onPlayerConsume(otherPlayer.id, 'player', 'player', 'main');
-					return; // Only consume one at a time
+					return;
 				}
 			}
 		}
@@ -193,41 +198,38 @@ export class CollisionDetection {
 		for (const otherSplit of otherPlayerSplits) {
 			if (
 				otherSplit.playerId !== myPlayerId &&
-				player.mass >= otherSplit.mass * 1.1
+				player.mass >= otherSplit.mass * 1.1 // Use actual mass for logic
 			) {
 				const dist = distance(player.x, player.y, otherSplit.x, otherSplit.y);
-				if (dist < player.radius) {
-					// DON'T add mass here - let server handle it to avoid double mass
+				if (dist < player.radius) { // Use visual radius for collision
 					onPlayerConsume(otherSplit.id.toString(), 'split', 'player', 'main');
-					return; // Only consume one at a time
+					return;
 				}
 			}
 		}
 
 		// Check if my splits can eat other players
 		for (const split of splits) {
-			const splitRadius = radiusFromMass(split.mass);
+			const splitRadius = radiusFromMass(split.visualMass); // Use visual radius for collision
 
 			// Check vs other players
 			for (const otherPlayer of otherPlayers) {
-				if (split.mass >= otherPlayer.mass * 1.1) {
+				if (split.mass >= otherPlayer.mass * 1.1) { // Use actual mass for logic
 					const dist = distance(split.x, split.y, otherPlayer.x, otherPlayer.y);
 					if (dist < splitRadius) {
-						// DON'T add mass here - let server handle it to avoid double mass
 						onPlayerConsume(otherPlayer.id, 'player', 'split', split.id);
-						return; // Only consume one at a time
+						return;
 					}
 				}
 			}
 
 			// Check vs other players' splits
 			for (const otherSplit of otherPlayerSplits) {
-				if (otherSplit.playerId !== myPlayerId && split.mass >= otherSplit.mass * 1.1) {
+				if (otherSplit.playerId !== myPlayerId && split.mass >= otherSplit.mass * 1.1) { // Use actual mass for logic
 					const dist = distance(split.x, split.y, otherSplit.x, otherSplit.y);
 					if (dist < splitRadius) {
-						// DON'T add mass here - let server handle it to avoid double mass
 						onPlayerConsume(otherSplit.id.toString(), 'split', 'split', split.id);
-						return; // Only consume one at a time
+						return;
 					}
 				}
 			}
@@ -249,25 +251,23 @@ export class CollisionDetection {
 			const ejected = otherPlayerEjected[i];
 
 			const dist = distance(player.x, player.y, ejected.x, ejected.y);
-			if (dist < player.radius) {
-				// DON'T remove here - let server broadcast handle removal for all clients
+			if (dist < player.radius) { // Use visual radius for collision
 				onEjectedConsume(ejected.id, 'player', 'main');
-				return; // Only consume one at a time
+				return;
 			}
 		}
 
 		// Check if my splits can eat other players' ejected mass
 		for (const split of splits) {
-			const splitRadius = radiusFromMass(split.mass);
+			const splitRadius = radiusFromMass(split.visualMass); // Use visual radius for collision
 
 			for (let i = otherPlayerEjected.length - 1; i >= 0; i--) {
 				const ejected = otherPlayerEjected[i];
 
 				const dist = distance(split.x, split.y, ejected.x, ejected.y);
 				if (dist < splitRadius) {
-					// DON'T remove here - let server broadcast handle removal for all clients
 					onEjectedConsume(ejected.id, 'split', split.id);
-					return; // Only consume one at a time
+					return;
 				}
 			}
 		}
@@ -290,7 +290,7 @@ export class CollisionDetection {
 			return [];
 		}
 
-		// Calculate how many pieces to create
+		// Calculate how many pieces to create - use actual mass for logic
 		const targetPieces = Math.min(Math.floor(blob.mass / 12.5), maxNewCells);
 		const piecesToCreate = Math.max(4, targetPieces);
 
@@ -313,12 +313,13 @@ export class CollisionDetection {
 			const mergeDelay = 30000 + 0.02333 * massPerPiece * 1000;
 
 			newPieces.push({
-				id: `virus-split-${Date.now()}-${i}`, // Generate unique ID
+				id: `virus-split-${Date.now()}-${i}`,
 				x: virusX,
 				y: virusY,
 				vx,
 				vy,
 				mass: massPerPiece,
+				visualMass: massPerPiece, // NEW: Initialize visual mass
 				born: now,
 				mergeDelay,
 			});
@@ -343,6 +344,7 @@ export class CollisionDetection {
 			const virus = viruses[i];
 			const dist = distance(virus.x, virus.y, player.x, player.y);
 
+			// Use actual mass for explosion threshold, visual radius for collision
 			if (dist < player.radius && player.mass >= virusExplodeThreshold) {
 				const pieces = this.explodeOnVirus(
 					player,
@@ -353,16 +355,17 @@ export class CollisionDetection {
 					virusMass
 				);
 				newPieces.push(...pieces);
-				onVirusConsume(virus.id); // Notify server
+				onVirusConsume(virus.id);
 				continue;
 			}
 
 			// Check virus collisions with split blobs
 			for (let j = 0; j < splits.length; j++) {
 				const s = splits[j];
-				const splitRadius = radiusFromMass(s.mass);
+				const splitRadius = radiusFromMass(s.visualMass); // Use visual radius for collision
 				const splitDist = distance(virus.x, virus.y, s.x, s.y);
 
+				// Use actual mass for explosion threshold
 				if (splitDist < splitRadius && s.mass >= virusExplodeThreshold) {
 					const pieces = this.explodeOnVirus(
 						s,
@@ -373,7 +376,7 @@ export class CollisionDetection {
 						virusMass
 					);
 					newPieces.push(...pieces);
-					onVirusConsume(virus.id); // Notify server
+					onVirusConsume(virus.id);
 					break;
 				}
 			}
