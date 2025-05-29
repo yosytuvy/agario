@@ -77,8 +77,8 @@ export class WebSocketService {
     private onPlayerUpdate: ((playerId: string, x: number, y: number, mass: number, radius: number, color?: string) => void) | null = null;
     private onOtherPlayerSplitsReceived: ((splits: OtherPlayerSplit[]) => void) | null = null;
     private onOtherPlayerEjectedReceived: ((ejected: OtherPlayerEjected[]) => void) | null = null;
-    private onPlayerConsumed: ((targetId: string, targetType: 'player' | 'split', consumerId?: string, newMass?: number, gainedMass?: number, consumingEntityType?: string, consumingEntityIndex?: number) => void) | null = null;
-    private onOtherEjectedConsumed: ((ejectedId: number, consumerId?: string, newMass?: number, gainedMass?: number, consumingEntityType?: string, consumingEntityIndex?: number, originalOwnerId?: string) => void) | null = null;
+    private onPlayerConsumed: ((targetId: string, targetType: 'player' | 'split', consumerId?: string, newMass?: number, gainedMass?: number, consumingEntityType?: string, consumingEntityId?: string) => void) | null = null;
+    private onOtherEjectedConsumed: ((ejectedId: number, consumerId?: string, newMass?: number, gainedMass?: number, consumingEntityType?: string, consumingEntityId?: string, originalOwnerId?: string) => void) | null = null;
 
     constructor(
         private url: string = 'ws://localhost:8000/ws'
@@ -100,8 +100,8 @@ export class WebSocketService {
         onPlayerUpdate: (playerId: string, x: number, y: number, mass: number, radius: number, color?: string) => void,
         onOtherPlayerSplits: (splits: OtherPlayerSplit[]) => void,
         onOtherPlayerEjected: (ejected: OtherPlayerEjected[]) => void,
-        onPlayerConsumed: (targetId: string, targetType: 'player' | 'split', consumerId?: string, newMass?: number, gainedMass?: number, consumingEntityType?: string, consumingEntityIndex?: number) => void,
-        onOtherEjectedConsumed: (ejectedId: number, consumerId?: string, newMass?: number, gainedMass?: number, consumingEntityType?: string, consumingEntityIndex?: number, originalOwnerId?: string) => void
+        onPlayerConsumed: (targetId: string, targetType: 'player' | 'split', consumerId?: string, newMass?: number, gainedMass?: number, consumingEntityType?: string, consumingEntityId?: string) => void,
+        onOtherEjectedConsumed: (ejectedId: number, consumerId?: string, newMass?: number, gainedMass?: number, consumingEntityType?: string, consumingEntityId?: string, originalOwnerId?: string) => void
     ) {
         this.onConfigReceived = onConfig;
         this.onPlayerIdReceived = onPlayerId;
@@ -256,13 +256,13 @@ export class WebSocketService {
             
             case 'player_consumed':
                 if (this.onPlayerConsumed) {
-                    this.onPlayerConsumed(data.targetId, data.targetType, data.consumerId, data.newMass, data.gainedMass, data.consumingEntityType, data.consumingEntityIndex);
+                    this.onPlayerConsumed(data.targetId, data.targetType, data.consumerId, data.newMass, data.gainedMass, data.consumingEntityType, data.consumingEntityId);
                 }
                 break;
             
             case 'other_ejected_consumed':
                 if (this.onOtherEjectedConsumed) {
-                    this.onOtherEjectedConsumed(data.ejectedId, data.consumerId, data.newMass, data.gainedMass, data.consumingEntityType, data.consumingEntityIndex, data.originalOwnerId);
+                    this.onOtherEjectedConsumed(data.ejectedId, data.consumerId, data.newMass, data.gainedMass, data.consumingEntityType, data.consumingEntityId, data.originalOwnerId);
                 }
                 break;
         }
@@ -276,6 +276,7 @@ export class WebSocketService {
                 
                 // Convert splits and ejected to simple objects
                 const splitsData = splits.map(s => ({
+                    id: s.id,
                     x: s.x,
                     y: s.y,
                     vx: s.vx,
@@ -336,26 +337,26 @@ export class WebSocketService {
         }
     }
 
-    consumePlayer(targetId: string, targetType: 'player' | 'split', consumingEntityType?: 'player' | 'split', consumingEntityIndex?: number, consumingEntity?: {x: number, y: number, mass: number}) {
+    consumePlayer(targetId: string, targetType: 'player' | 'split', consumingEntityType?: 'player' | 'split', consumingEntityId?: string, consumingEntity?: {x: number, y: number, mass: number}) {
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
             this.ws.send(JSON.stringify({
                 type: 'consume_player',
                 targetId: targetId,
                 targetType: targetType,
                 consumingEntityType: consumingEntityType || 'player',
-                consumingEntityIndex: consumingEntityIndex || -1,
+                consumingEntityId: consumingEntityId || 'main',
                 consumingEntity: consumingEntity
             }));
         }
     }
 
-    consumeOtherEjected(ejectedId: number, consumingEntityType?: 'player' | 'split', consumingEntityIndex?: number, consumingEntity?: {x: number, y: number, mass: number}) {
+    consumeOtherEjected(ejectedId: number, consumingEntityType?: 'player' | 'split', consumingEntityId?: string, consumingEntity?: {x: number, y: number, mass: number}) {
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
             this.ws.send(JSON.stringify({
                 type: 'consume_other_ejected',
                 ejectedId: ejectedId,
                 consumingEntityType: consumingEntityType || 'player',
-                consumingEntityIndex: consumingEntityIndex || -1,
+                consumingEntityId: consumingEntityId || 'main',
                 consumingEntity: consumingEntity
             }));
         }

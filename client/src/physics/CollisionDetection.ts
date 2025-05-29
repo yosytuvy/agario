@@ -174,7 +174,7 @@ export class CollisionDetection {
 			targetId: string,
 			targetType: 'player' | 'split',
 			consumingEntityType?: 'player' | 'split',
-			consumingEntityIndex?: number
+			consumingEntityId?: string
 		) => void
 	): void {
 		// Check if main player can eat other players
@@ -183,7 +183,7 @@ export class CollisionDetection {
 				const dist = distance(player.x, player.y, otherPlayer.x, otherPlayer.y);
 				if (dist < player.radius) {
 					// DON'T add mass here - let server handle it to avoid double mass
-					onPlayerConsume(otherPlayer.id, 'player', 'player', -1);
+					onPlayerConsume(otherPlayer.id, 'player', 'player', 'main');
 					return; // Only consume one at a time
 				}
 			}
@@ -198,15 +198,14 @@ export class CollisionDetection {
 				const dist = distance(player.x, player.y, otherSplit.x, otherSplit.y);
 				if (dist < player.radius) {
 					// DON'T add mass here - let server handle it to avoid double mass
-					onPlayerConsume(otherSplit.id.toString(), 'split', 'player', -1);
+					onPlayerConsume(otherSplit.id.toString(), 'split', 'player', 'main');
 					return; // Only consume one at a time
 				}
 			}
 		}
 
 		// Check if my splits can eat other players
-		for (let splitIndex = 0; splitIndex < splits.length; splitIndex++) {
-			const split = splits[splitIndex];
+		for (const split of splits) {
 			const splitRadius = radiusFromMass(split.mass);
 
 			// Check vs other players
@@ -215,7 +214,7 @@ export class CollisionDetection {
 					const dist = distance(split.x, split.y, otherPlayer.x, otherPlayer.y);
 					if (dist < splitRadius) {
 						// DON'T add mass here - let server handle it to avoid double mass
-						onPlayerConsume(otherPlayer.id, 'player', 'split', splitIndex);
+						onPlayerConsume(otherPlayer.id, 'player', 'split', split.id);
 						return; // Only consume one at a time
 					}
 				}
@@ -227,7 +226,7 @@ export class CollisionDetection {
 					const dist = distance(split.x, split.y, otherSplit.x, otherSplit.y);
 					if (dist < splitRadius) {
 						// DON'T add mass here - let server handle it to avoid double mass
-						onPlayerConsume(otherSplit.id.toString(), 'split', 'split', splitIndex);
+						onPlayerConsume(otherSplit.id.toString(), 'split', 'split', split.id);
 						return; // Only consume one at a time
 					}
 				}
@@ -242,7 +241,7 @@ export class CollisionDetection {
 		onEjectedConsume: (
 			ejectedId: number,
 			consumingEntityType?: 'player' | 'split',
-			consumingEntityIndex?: number
+			consumingEntityId?: string
 		) => void
 	): void {
 		// Check if main player can eat other players' ejected mass
@@ -252,14 +251,13 @@ export class CollisionDetection {
 			const dist = distance(player.x, player.y, ejected.x, ejected.y);
 			if (dist < player.radius) {
 				// DON'T remove here - let server broadcast handle removal for all clients
-				onEjectedConsume(ejected.id, 'player', -1);
+				onEjectedConsume(ejected.id, 'player', 'main');
 				return; // Only consume one at a time
 			}
 		}
 
 		// Check if my splits can eat other players' ejected mass
-		for (let splitIndex = 0; splitIndex < splits.length; splitIndex++) {
-			const split = splits[splitIndex];
+		for (const split of splits) {
 			const splitRadius = radiusFromMass(split.mass);
 
 			for (let i = otherPlayerEjected.length - 1; i >= 0; i--) {
@@ -268,7 +266,7 @@ export class CollisionDetection {
 				const dist = distance(split.x, split.y, ejected.x, ejected.y);
 				if (dist < splitRadius) {
 					// DON'T remove here - let server broadcast handle removal for all clients
-					onEjectedConsume(ejected.id, 'split', splitIndex);
+					onEjectedConsume(ejected.id, 'split', split.id);
 					return; // Only consume one at a time
 				}
 			}
@@ -315,6 +313,7 @@ export class CollisionDetection {
 			const mergeDelay = 30000 + 0.02333 * massPerPiece * 1000;
 
 			newPieces.push({
+				id: `virus-split-${Date.now()}-${i}`, // Generate unique ID
 				x: virusX,
 				y: virusY,
 				vx,

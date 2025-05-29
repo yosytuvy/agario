@@ -16,6 +16,7 @@ export interface Ejected {
 }
 
 export interface SplitBlob {
+    id: string; // Added unique ID for split blob
     x: number;
     y: number;
     vx: number;

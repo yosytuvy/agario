@@ -89,6 +89,7 @@ export class InputHandler {
             const mergeDelay = 30000 + 0.02333 * half * 1000;
             
             newSplits.push({
+                id: `split-${Date.now()}-${Math.random()}`, // Generate unique ID
                 x: player.x,
                 y: player.y,
                 vx,
@@ -110,6 +111,7 @@ export class InputHandler {
                 const mergeDelay = 30000 + 0.02333 * half * 1000;
                 
                 newSplits.push({
+                    id: `split-${Date.now()}-${Math.random()}-${i}`, // Generate unique ID
                     x: s.x,
                     y: s.y,
                     vx,

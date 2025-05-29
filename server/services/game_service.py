@@ -27,14 +27,13 @@ class GameService:
         self.viruses: Dict[int, Virus] = {}
         self.virus_projectiles: Dict[int, VirusProjectile] = {}
         self.players: Dict[str, Player] = {}
-        self.player_splits: Dict[int, PlayerSplit] = {}
+        self.player_splits: Dict[str, PlayerSplit] = {}  # Changed to store by split ID
         self.player_ejected: Dict[int, PlayerEjected] = {}
 
         # ID generators
         self.next_pellet_id = 0
         self.next_virus_id = 0
         self.next_projectile_id = 0
-        self.next_split_id = 0
         self.next_ejected_id = 0
 
         self._initialize_world()
@@ -168,11 +167,10 @@ class GameService:
         for split_id in splits_to_remove:
             del self.player_splits[split_id]
 
-        # Add new splits
+        # Add new splits with their client-provided IDs
         for split_data in splits_data:
-            split_id = self.next_split_id
-            self.next_split_id += 1
-
+            split_id = split_data.get("id", f"split-{player_id}-{len(self.player_splits)}")
+            
             split = PlayerSplit(
                 id=split_id,
                 playerId=player_id,
@@ -275,7 +273,7 @@ class GameService:
         target_id: str,
         target_type: str,
         consuming_entity_type: str = "player",
-        consuming_entity_index: int = -1,
+        consuming_entity_id: str = "main",
         consuming_entity_data: dict = None,
     ) -> Optional[dict]:
         """Handle player consuming another player or split."""
@@ -287,7 +285,7 @@ class GameService:
 
         # Get consuming entity data for validation
         consuming_mass, consuming_x, consuming_y = self._get_consuming_entity_data(
-            consumer, consuming_entity_type, consuming_entity_data
+            consumer, consuming_entity_type, consuming_entity_id, consuming_entity_data
         )
 
         if consuming_mass == 0:
@@ -301,7 +299,7 @@ class GameService:
                 consuming_x,
                 consuming_y,
                 consuming_entity_type,
-                consuming_entity_index,
+                consuming_entity_id,
             )
         elif target_type == "split":
             return self._consume_target_split(
@@ -311,7 +309,7 @@ class GameService:
                 consuming_x,
                 consuming_y,
                 consuming_entity_type,
-                consuming_entity_index,
+                consuming_entity_id,
             )
 
         return None
@@ -321,7 +319,7 @@ class GameService:
         consumer_id: str,
         ejected_id: int,
         consuming_entity_type: str = "player",
-        consuming_entity_index: int = -1,
+        consuming_entity_id: str = "main",
         consuming_entity_data: dict = None,
     ) -> Optional[dict]:
         """Handle player consuming other players' ejected mass."""
@@ -340,7 +338,7 @@ class GameService:
         # Validate collision
         consuming_x, consuming_y, consuming_radius = (
             self._get_consuming_position_and_radius(
-                consumer, consuming_entity_type, consuming_entity_data
+                consumer, consuming_entity_type, consuming_entity_id, consuming_entity_data
             )
         )
 
@@ -370,7 +368,7 @@ class GameService:
             "consumerId": consumer_id,
             "newMass": new_mass,
             "consumingEntityType": consuming_entity_type,
-            "consumingEntityIndex": consuming_entity_index,
+            "consumingEntityId": consuming_entity_id,
             "originalOwnerId": target_ejected.playerId,
         }
 
@@ -424,7 +422,7 @@ class GameService:
 
     # Helper methods
     def _get_consuming_entity_data(
-        self, consumer: Player, consuming_entity_type: str, consuming_entity_data: dict
+        self, consumer: Player, consuming_entity_type: str, consuming_entity_id: str, consuming_entity_data: dict
     ) -> tuple:
         """Get consuming entity mass and position."""
         if consuming_entity_type == "player":
@@ -438,7 +436,7 @@ class GameService:
         return 0, 0, 0
 
     def _get_consuming_position_and_radius(
-        self, consumer: Player, consuming_entity_type: str, consuming_entity_data: dict
+        self, consumer: Player, consuming_entity_type: str, consuming_entity_id: str, consuming_entity_data: dict
     ) -> tuple:
         """Get consuming entity position and radius."""
         if consuming_entity_type == "player":
@@ -461,7 +459,7 @@ class GameService:
         consuming_x: float,
         consuming_y: float,
         consuming_entity_type: str,
-        consuming_entity_index: int,
+        consuming_entity_id: str,
     ) -> Optional[dict]:
         """Handle consuming a target player."""
         if target_id not in self.players:
@@ -495,7 +493,7 @@ class GameService:
             "consumerId": consumer.id,
             "newMass": new_mass,
             "consumingEntityType": consuming_entity_type,
-            "consumingEntityIndex": consuming_entity_index,
+            "consumingEntityId": consuming_entity_id,
         }
 
     def _consume_target_split(
@@ -506,14 +504,30 @@ class GameService:
         consuming_x: float,
         consuming_y: float,
         consuming_entity_type: str,
-        consuming_entity_index: int,
+        consuming_entity_id: str,
     ) -> Optional[dict]:
         """Handle consuming a target split."""
-        target_split_id = int(target_id)
-        if target_split_id not in self.player_splits:
+        # Handle both old integer IDs and new string IDs
+        target_split = None
+        
+        # First check if it's a string ID in our splits
+        if target_id in self.player_splits:
+            target_split = self.player_splits[target_id]
+            actual_split_id = target_id
+        else:
+            # Try to find by integer ID for backward compatibility
+            try:
+                target_split_id = int(target_id)
+                for split_id, split in self.player_splits.items():
+                    if hasattr(split, 'id') and isinstance(split.id, int) and split.id == target_split_id:
+                        target_split = split
+                        actual_split_id = split_id
+                        break
+            except ValueError:
+                pass
+        
+        if not target_split:
             return None
-
-        target_split = self.player_splits[target_split_id]
 
         # Validate size advantage and collision
         if consuming_mass < target_split.mass * 1.1 or math.hypot(
@@ -532,7 +546,7 @@ class GameService:
             new_mass = consuming_mass + gained_mass
 
         # Remove the split
-        del self.player_splits[target_split_id]
+        del self.player_splits[actual_split_id]
 
         return {
             "targetId": target_id,
@@ -541,7 +555,7 @@ class GameService:
             "consumerId": consumer.id,
             "newMass": new_mass,
             "consumingEntityType": consuming_entity_type,
-            "consumingEntityIndex": consuming_entity_index,
+            "consumingEntityId": consuming_entity_id,
         }
 
     # Getter methods for game state
@@ -562,8 +576,15 @@ class GameService:
         return [asdict(player) for player in self.players.values()]
 
     def get_all_player_splits(self) -> List[dict]:
-        """Get all player splits as dictionaries."""
-        return [asdict(split) for split in self.player_splits.values()]
+        """Get all player splits as dictionaries, converting to format expected by client."""
+        splits = []
+        for split in self.player_splits.values():
+            split_dict = asdict(split)
+            # For backward compatibility, ensure numeric ID if client expects it
+            if 'id' not in split_dict or not isinstance(split_dict['id'], (int, str)):
+                split_dict['id'] = hash(split.id) % 1000000  # Create a numeric ID from string
+            splits.append(split_dict)
+        return splits
 
     def get_all_player_ejected(self) -> List[dict]:
         """Get all player ejected mass as dictionaries."""

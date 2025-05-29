@@ -228,7 +228,7 @@ export const useGameState = () => {
                         gameState.current.otherPlayerEjected = ejected;
                     },
                     // On player consumed
-                    (targetId, targetType, consumerId, newMass, gainedMass, consumingEntityType, consumingEntityIndex) => {
+                    (targetId, targetType, consumerId, newMass, gainedMass, consumingEntityType, consumingEntityId) => {
                         if (targetType === 'player') {
                             // Check if I was the one consumed
                             if (targetId === playerIdRef.current) {
@@ -245,17 +245,17 @@ export const useGameState = () => {
                             
                             // Check if I was the consumer - update mass
                             if (consumerId === playerIdRef.current && newMass) {
-                                if (consumingEntityType === 'player') {
+                                if (consumingEntityType === 'player' && consumingEntityId === 'main') {
                                     // Update main player mass
                                     gameState.current.player.mass = newMass;
                                     gameState.current.player.radius = radiusFromMass(newMass);
                                     console.log(`Main player consumed player! Gained ${gainedMass} mass. New mass: ${newMass}`);
-                                } else if (consumingEntityType === 'split' && consumingEntityIndex !== undefined && consumingEntityIndex >= 0) {
+                                } else if (consumingEntityType === 'split' && consumingEntityId) {
                                     // Update specific split mass
-                                    const split = gameState.current.splits[consumingEntityIndex];
+                                    const split = gameState.current.splits.find(s => s.id === consumingEntityId);
                                     if (split) {
                                         split.mass = newMass;
-                                        console.log(`Split ${consumingEntityIndex} consumed player! Gained ${gainedMass} mass. New mass: ${newMass}`);
+                                        console.log(`Split ${consumingEntityId} consumed player! Gained ${gainedMass} mass. New mass: ${newMass}`);
                                     }
                                 }
                             }
@@ -269,17 +269,17 @@ export const useGameState = () => {
                         } else if (targetType === 'split') {
                             // Check if I was the consumer - update mass
                             if (consumerId === playerIdRef.current && newMass) {
-                                if (consumingEntityType === 'player') {
+                                if (consumingEntityType === 'player' && consumingEntityId === 'main') {
                                     // Update main player mass
                                     gameState.current.player.mass = newMass;
                                     gameState.current.player.radius = radiusFromMass(newMass);
                                     console.log(`Main player consumed split! Gained ${gainedMass} mass. New mass: ${newMass}`);
-                                } else if (consumingEntityType === 'split' && consumingEntityIndex !== undefined && consumingEntityIndex >= 0) {
+                                } else if (consumingEntityType === 'split' && consumingEntityId) {
                                     // Update specific split mass
-                                    const split = gameState.current.splits[consumingEntityIndex];
+                                    const split = gameState.current.splits.find(s => s.id === consumingEntityId);
                                     if (split) {
                                         split.mass = newMass;
-                                        console.log(`Split ${consumingEntityIndex} consumed split! Gained ${gainedMass} mass. New mass: ${newMass}`);
+                                        console.log(`Split ${consumingEntityId} consumed split! Gained ${gainedMass} mass. New mass: ${newMass}`);
                                     }
                                 }
                             }
@@ -290,20 +290,20 @@ export const useGameState = () => {
                         }
                     },
                     // On other ejected consumed
-                    (ejectedId, consumerId, newMass, gainedMass, consumingEntityType, consumingEntityIndex, originalOwnerId) => {
+                    (ejectedId, consumerId, newMass, gainedMass, consumingEntityType, consumingEntityId, originalOwnerId) => {
                         // Check if I was the consumer - update mass
                         if (consumerId === playerIdRef.current && newMass) {
-                            if (consumingEntityType === 'player') {
+                            if (consumingEntityType === 'player' && consumingEntityId === 'main') {
                                 // Update main player mass
                                 gameState.current.player.mass = newMass;
                                 gameState.current.player.radius = radiusFromMass(newMass);
                                 console.log(`Main player consumed ejected! Gained ${gainedMass} mass. New mass: ${newMass}`);
-                            } else if (consumingEntityType === 'split' && consumingEntityIndex !== undefined && consumingEntityIndex >= 0) {
+                            } else if (consumingEntityType === 'split' && consumingEntityId) {
                                 // Update specific split mass
-                                const split = gameState.current.splits[consumingEntityIndex];
+                                const split = gameState.current.splits.find(s => s.id === consumingEntityId);
                                 if (split) {
                                     split.mass = newMass;
-                                    console.log(`Split ${consumingEntityIndex} consumed ejected! Gained ${gainedMass} mass. New mass: ${newMass}`);
+                                    console.log(`Split ${consumingEntityId} consumed ejected! Gained ${gainedMass} mass. New mass: ${newMass}`);
                                 }
                             }
                         }
@@ -344,7 +344,7 @@ export const useGameState = () => {
         }
     }, []);
 
-    const consumePlayer = useCallback((targetId: string, targetType: 'player' | 'split', consumingEntityType?: 'player' | 'split', consumingEntityIndex?: number) => {
+    const consumePlayer = useCallback((targetId: string, targetType: 'player' | 'split', consumingEntityType?: 'player' | 'split', consumingEntityId?: string) => {
         if (wsService.current) {
             // Get the consuming entity's position and mass for server validation
             let consumingEntity = null;
@@ -354,8 +354,8 @@ export const useGameState = () => {
                     y: gameState.current.player.y,
                     mass: gameState.current.player.mass
                 };
-            } else if (consumingEntityType === 'split' && consumingEntityIndex !== undefined && consumingEntityIndex >= 0) {
-                const split = gameState.current.splits[consumingEntityIndex];
+            } else if (consumingEntityType === 'split' && consumingEntityId) {
+                const split = gameState.current.splits.find(s => s.id === consumingEntityId);
                 if (split) {
                     consumingEntity = {
                         x: split.x,
@@ -365,11 +365,11 @@ export const useGameState = () => {
                 }
             }
             
-            wsService.current.consumePlayer(targetId, targetType, consumingEntityType, consumingEntityIndex, consumingEntity);
+            wsService.current.consumePlayer(targetId, targetType, consumingEntityType, consumingEntityId, consumingEntity);
         }
     }, []);
 
-    const consumeOtherEjected = useCallback((ejectedId: number, consumingEntityType?: 'player' | 'split', consumingEntityIndex?: number) => {
+    const consumeOtherEjected = useCallback((ejectedId: number, consumingEntityType?: 'player' | 'split', consumingEntityId?: string) => {
         if (wsService.current) {
             // Check if this ejected mass has already been consumed
             if (consumedEjectedIds.current.has(ejectedId)) {
@@ -387,8 +387,8 @@ export const useGameState = () => {
                     y: gameState.current.player.y,
                     mass: gameState.current.player.mass
                 };
-            } else if (consumingEntityType === 'split' && consumingEntityIndex !== undefined && consumingEntityIndex >= 0) {
-                const split = gameState.current.splits[consumingEntityIndex];
+            } else if (consumingEntityType === 'split' && consumingEntityId) {
+                const split = gameState.current.splits.find(s => s.id === consumingEntityId);
                 if (split) {
                     consumingEntity = {
                         x: split.x,
@@ -398,7 +398,7 @@ export const useGameState = () => {
                 }
             }
             
-            wsService.current.consumeOtherEjected(ejectedId, consumingEntityType, consumingEntityIndex, consumingEntity);
+            wsService.current.consumeOtherEjected(ejectedId, consumingEntityType, consumingEntityId, consumingEntity);
         }
     }, []);
 

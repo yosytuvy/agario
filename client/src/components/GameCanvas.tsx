@@ -192,8 +192,8 @@ const GameCanvas: React.FC = () => {
                 gameState.otherPlayers,
                 gameState.otherPlayerSplits,
                 getMyPlayerId(),
-                (targetId, targetType, consumingEntityType, consumingEntityIndex) => 
-                    consumePlayer(targetId, targetType, consumingEntityType, consumingEntityIndex)
+                (targetId, targetType, consumingEntityType, consumingEntityId) => 
+                    consumePlayer(targetId, targetType, consumingEntityType, consumingEntityId)
             );
 
             // NEW: Check player vs other players' ejected mass collisions
@@ -201,8 +201,8 @@ const GameCanvas: React.FC = () => {
                 gameState.player,
                 gameState.splits,
                 gameState.otherPlayerEjected,
-                (ejectedId, consumingEntityType, consumingEntityIndex) => 
-                    consumeOtherEjected(ejectedId, consumingEntityType, consumingEntityIndex)
+                (ejectedId, consumingEntityType, consumingEntityId) => 
+                    consumeOtherEjected(ejectedId, consumingEntityType, consumingEntityId)
             );
 
             // Render all entities

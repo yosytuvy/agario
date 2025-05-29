@@ -185,7 +185,7 @@ class WebSocketService:
             data["targetId"],
             data["targetType"],
             data.get("consumingEntityType", "player"),
-            data.get("consumingEntityIndex", -1),
+            data.get("consumingEntityId", "main"),
             data.get("consumingEntity"),
         )
 
@@ -199,7 +199,7 @@ class WebSocketService:
             player_id,
             data["ejectedId"],
             data.get("consumingEntityType", "player"),
-            data.get("consumingEntityIndex", -1),
+            data.get("consumingEntityId", "main"),
             data.get("consumingEntity"),
         )
 
@@ -210,7 +210,7 @@ class WebSocketService:
     async def _handle_disconnect(self, websocket: WebSocket, player_id: str):
         """Handle client disconnection."""
         print(f"Player {player_id} disconnected")
-
+        
         # Clean up
         if websocket in self.connected_clients:
             self.connected_clients.remove(websocket)
