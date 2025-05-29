@@ -22,6 +22,7 @@ export interface SplitBlob {
     vx: number;
     vy: number;
     mass: number;
+    visualMass: number; // NEW: For smooth growth animation
     born: number;
     mergeDelay: number;
 }
@@ -49,6 +50,7 @@ export interface Player {
     x: number;
     y: number;
     mass: number;
+    visualMass: number; // NEW: For smooth growth animation
     radius: number;
     color: string;
 }

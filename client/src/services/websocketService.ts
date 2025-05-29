@@ -153,6 +153,51 @@ export class WebSocketService {
         }
     }
 
+    // NEW: Reconnect method for fresh start after death
+    reconnect() {
+        console.log('Reconnecting to server for fresh start...');
+        
+        // Disconnect current connection
+        this.disconnect();
+        
+        // Clear state
+        this.resetState();
+        
+        // Reconnect after short delay
+        setTimeout(() => {
+            this.connect(
+                this.onConfigReceived!,
+                this.onPlayerIdReceived!,
+                this.onPelletsReceived!,
+                this.onVirusesReceived!,
+                this.onVirusProjectilesReceived!,
+                this.onPelletUpdate!,
+                this.onVirusUpdate!,
+                this.onVirusFeed!,
+                this.onProjectileUpdates!,
+                this.onOtherPlayersReceived!,
+                this.onPlayerJoined!,
+                this.onPlayerLeft!,
+                this.onPlayerUpdate!,
+                this.onOtherPlayerSplitsReceived!,
+                this.onOtherPlayerEjectedReceived!,
+                this.onPlayerConsumed!,
+                this.onOtherEjectedConsumed!
+            );
+        }, 500);
+    }
+
+    private resetState() {
+        // Reset timing
+        this.lastUpdateTime = 0;
+        
+        // Clear any existing reconnect attempts
+        if (this.reconnectInterval) {
+            clearInterval(this.reconnectInterval);
+            this.reconnectInterval = null;
+        }
+    }
+
     private handleMessage(data: any) {
         switch (data.type) {
             case 'init':

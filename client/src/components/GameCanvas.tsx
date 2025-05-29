@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from "react";
+import React, { useRef, useEffect, useState, useCallback } from "react";
 import { useGameState } from "../hooks/useGameState";
 import { GameRenderer } from "../rendering/GameRenderer";
 import { CollisionDetection } from "../physics/CollisionDetection";
@@ -8,6 +8,7 @@ import {
     SplitBlobManager,
     PlayerManager,
 } from "../entities/EntityManagers";
+import StartScreen from "./StartScreen";
 
 const GameCanvas: React.FC = () => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -16,6 +17,18 @@ const GameCanvas: React.FC = () => {
         x: window.innerWidth / 2,
         y: window.innerHeight / 2,
     });
+
+    const [gameStarted, setGameStarted] = useState(false);
+    const [backgroundOffset, setBackgroundOffset] = useState({ x: 0, y: 0 });
+    const animationIdRef = useRef<number>();
+
+    const handlePlayerDeath = useCallback(() => {
+        setGameStarted(false);
+        // Generate new random background offset
+        const randomX = Math.random() * 2000 - 1000;
+        const randomY = Math.random() * 2000 - 1000;
+        setBackgroundOffset({ x: randomX, y: randomY });
+    }, []);
 
     const { 
         gameState, 
@@ -44,8 +57,16 @@ const GameCanvas: React.FC = () => {
         getSplitFlightDuration,
         getMergeSpeed,
         getDecayRate,
-        getMyPlayerId
-    } = useGameState();
+        getMyPlayerId,
+        resetGame
+    } = useGameState(handlePlayerDeath);
+
+    // Generate random background offset for start screen
+    useEffect(() => {
+        const randomX = Math.random() * 2000 - 1000;
+        const randomY = Math.random() * 2000 - 1000;
+        setBackgroundOffset({ x: randomX, y: randomY });
+    }, []);
 
     useEffect(() => {
         const canvas = canvasRef.current!;
@@ -63,7 +84,25 @@ const GameCanvas: React.FC = () => {
         };
         window.addEventListener("mousemove", onMouseMove);
 
+        // Initialize game only once
+        initializeGame();
+
+        return () => {
+            window.removeEventListener("resize", onResize);
+            window.removeEventListener("mousemove", onMouseMove);
+            if (animationIdRef.current) {
+                cancelAnimationFrame(animationIdRef.current);
+            }
+        };
+    }, []); // Remove gameStarted dependency to prevent re-initialization
+
+    // Separate effect for keyboard events that depends on gameStarted
+    useEffect(() => {
         const onKeyDown = (e: KeyboardEvent) => {
+            // Only handle input when game is started
+            if (!gameStarted) return;
+
+            const canvas = canvasRef.current!;
             const worldMouseX =
                 (mousePos.current.x - canvas.width / 2) / gameState.currentZoom +
                 gameState.player.x;
@@ -86,6 +125,7 @@ const GameCanvas: React.FC = () => {
             }
             
             if (e.key === " ") {
+                e.preventDefault();
                 const newSplits = InputHandler.handleSplit(
                     gameState.player,
                     gameState.splits,
@@ -97,23 +137,35 @@ const GameCanvas: React.FC = () => {
                 gameState.splits.push(...newSplits);
             }
         };
+
         window.addEventListener("keydown", onKeyDown);
 
-        // Initialize game only once
-        initializeGame();
-        
+        return () => {
+            window.removeEventListener("keydown", onKeyDown);
+        };
+    }, [gameStarted, gameState.currentZoom]); // Add dependencies so it updates when game state changes
+
+    // Separate effect for game loop to control performance
+    useEffect(() => {
         let lastTs = performance.now();
-        let animationId: number;
 
         const gameLoop = (ts: number) => {
             const dt = (ts - lastTs) / 1000;
             lastTs = ts;
             const nowTs = Date.now();
 
-            // Get player velocity for split blob mimicking
-            const { velX, velY } = getPlayerVelocity(dt);
+            // PERFORMANCE FIX: Reduce update frequency when on start screen
+            if (!gameStarted) {
+                // Only update 10 times per second when on start screen
+                if (ts % 100 < 16) { // Roughly every 100ms
+                    renderStartScreenBackground();
+                }
+                animationIdRef.current = requestAnimationFrame(gameLoop);
+                return;
+            }
 
-            // Update zoom
+            // Normal game loop when playing
+            const { velX, velY } = getPlayerVelocity(dt);
             updateZoom();
 
             // Setup rendering transform
@@ -123,12 +175,16 @@ const GameCanvas: React.FC = () => {
                 gameState.currentZoom
             );
 
-            // Draw grid with server-provided values
+            // Clear any filters for active gameplay
+            const ctx = canvasRef.current!.getContext('2d')!;
+            ctx.filter = 'none';
+
+            // Draw grid
             rendererRef.current!.drawGrid(getWorldSize(), getGridSize());
 
             // Calculate mouse direction for player movement
-            const pdx = mousePos.current.x - canvas.width / 2;
-            const pdy = mousePos.current.y - canvas.height / 2;
+            const pdx = mousePos.current.x - canvasRef.current!.width / 2;
+            const pdy = mousePos.current.y - canvasRef.current!.height / 2;
 
             // Update player
             PlayerManager.update(gameState.player, pdx, pdy, dt, getWorldSize(), getDecayRate());
@@ -166,7 +222,6 @@ const GameCanvas: React.FC = () => {
                 feedVirus
             );
 
-            // Check pellet collisions with server notification
             CollisionDetection.checkPelletCollisions(
                 gameState.player,
                 gameState.splits,
@@ -185,7 +240,6 @@ const GameCanvas: React.FC = () => {
             );
             gameState.splits.push(...virusExplosionPieces);
 
-            // NEW: Check player vs other players collisions
             CollisionDetection.checkPlayerVsOtherPlayersCollisions(
                 gameState.player,
                 gameState.splits,
@@ -196,7 +250,6 @@ const GameCanvas: React.FC = () => {
                     consumePlayer(targetId, targetType, consumingEntityType, consumingEntityId)
             );
 
-            // NEW: Check player vs other players' ejected mass collisions
             CollisionDetection.checkPlayerVsOtherEjectedCollisions(
                 gameState.player,
                 gameState.splits,
@@ -216,21 +269,70 @@ const GameCanvas: React.FC = () => {
             // Send player update to server
             sendPlayerUpdate();
 
-            animationId = requestAnimationFrame(gameLoop);
+            animationIdRef.current = requestAnimationFrame(gameLoop);
         };
 
-        animationId = requestAnimationFrame(gameLoop);
+        const renderStartScreenBackground = () => {
+            const canvas = canvasRef.current!;
+            const ctx = canvas.getContext('2d')!;
+            
+            // PERFORMANCE FIX: Apply gray filter via canvas, not CSS
+            rendererRef.current!.setupTransform(
+                getWorldSize() / 2 + backgroundOffset.x,
+                getWorldSize() / 2 + backgroundOffset.y,
+                0.5
+            );
+
+            // Draw grid
+            rendererRef.current!.drawGrid(getWorldSize(), getGridSize());
+
+            // Draw some entities for background
+            const allEntities = getAllEntities();
+            const sortedEntities = rendererRef.current!.sortEntities(allEntities);
+            
+            // PERFORMANCE FIX: Only draw a subset of entities for background
+            for (let i = 0; i < Math.min(sortedEntities.length, 50); i++) {
+                rendererRef.current!.drawEntity(sortedEntities[i]);
+            }
+
+            // Apply grayscale effect via canvas globalCompositeOperation
+            ctx.globalCompositeOperation = 'multiply';
+            ctx.fillStyle = 'rgba(128, 128, 128, 0.7)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.globalCompositeOperation = 'source-over';
+        };
+
+        animationIdRef.current = requestAnimationFrame(gameLoop);
 
         return () => {
-            window.removeEventListener("resize", onResize);
-            window.removeEventListener("mousemove", onMouseMove);
-            window.removeEventListener("keydown", onKeyDown);
-            cancelAnimationFrame(animationId);
+            if (animationIdRef.current) {
+                cancelAnimationFrame(animationIdRef.current);
+            }
         };
-    }, []); // Remove all dependencies to ensure single initialization
-    
-    return <canvas ref={canvasRef} />;
+    }, [gameStarted]); // Only depend on gameStarted
 
+    const handleStartGame = () => {
+        setGameStarted(true);
+        // Generate new random background offset for next time
+        const randomX = Math.random() * 2000 - 1000;
+        const randomY = Math.random() * 2000 - 1000;
+        setBackgroundOffset({ x: randomX, y: randomY });
+    };
+
+    return (
+        <div style={{ position: 'relative', width: '100%', height: '100vh' }}>
+            <canvas 
+                ref={canvasRef} 
+                style={{ 
+                    display: 'block',
+                    background: '#f0f0f0'
+                }} 
+            />
+            {!gameStarted && (
+                <StartScreen onStartGame={handleStartGame} />
+            )}
+        </div>
+    );
 };
 
 export default GameCanvas;

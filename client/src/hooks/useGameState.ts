@@ -31,12 +31,13 @@ let MERGE_SPEED = 100;
 let START_MASS = 25;
 let DECAY_RATE = 0.002;
 
-export const useGameState = () => {
+export const useGameState = (onPlayerDeath?: () => void) => {
     const gameState = useRef<GameState>({
         player: {
             x: WORLD_SIZE / 2,
             y: WORLD_SIZE / 2,
             mass: START_MASS,
+            visualMass: START_MASS, // NEW: Initialize visual mass
             radius: radiusFromMass(START_MASS),
             color: "#66ccff",
         },
@@ -58,7 +59,33 @@ export const useGameState = () => {
     const virusProjectilesMap = useRef<Map<number, VirusProjectile>>(new Map());
     const otherPlayersMap = useRef<Map<string, OtherPlayer>>(new Map());
     const playerIdRef = useRef<string | null>(null);
-    const consumedEjectedIds = useRef<Set<number>>(new Set()); // Track consumed ejected to prevent multiple requests
+    const consumedEjectedIds = useRef<Set<number>>(new Set());
+
+    const resetGameState = useCallback(() => {
+        // Reset player to initial state
+        gameState.current.player = {
+            x: WORLD_SIZE / 2 + (Math.random() - 0.5) * 1000,
+            y: WORLD_SIZE / 2 + (Math.random() - 0.5) * 1000,
+            mass: START_MASS,
+            visualMass: START_MASS, // NEW: Initialize visual mass
+            radius: radiusFromMass(START_MASS),
+            color: `hsl(${Math.random() * 360},70%,60%)`,
+        };
+
+        // Clear all player-specific entities
+        gameState.current.ejected = [];
+        gameState.current.splits = [];
+        gameState.current.currentZoom = 1;
+
+        // Reset position tracking
+        prevPos.current = { 
+            x: gameState.current.player.x, 
+            y: gameState.current.player.y 
+        };
+
+        // Clear consumed ejected tracking
+        consumedEjectedIds.current.clear();
+    }, []);
 
     const initializeGame = useCallback(() => {
         // Initialize WebSocket connection
@@ -107,18 +134,8 @@ export const useGameState = () => {
                         VirusRenderer.setConfig(config.virusColor, config.virusSpikeCount);
                         GameRenderer.setVirusMass(config.virusMass);
                         
-                        // Update player with starting mass from server and generate a color
-                        gameState.current.player.mass = START_MASS;
-                        gameState.current.player.radius = radiusFromMass(START_MASS);
-                        gameState.current.player.color = `hsl(${Math.random() * 360},70%,60%)`;
-                        
-                        // Update player position to center of world
-                        gameState.current.player.x = WORLD_SIZE / 2;
-                        gameState.current.player.y = WORLD_SIZE / 2;
-                        prevPos.current = { 
-                            x: gameState.current.player.x, 
-                            y: gameState.current.player.y 
-                        };
+                        // Always reset game state when receiving config (fresh start)
+                        resetGameState();
                     },
                     // On player ID received
                     (playerId) => {
@@ -161,7 +178,6 @@ export const useGameState = () => {
                         if (virus) {
                             virus.mass = newMass;
                             if (newMass === VIRUS_MASS) {
-                                // Virus was reset after splitting
                                 virus.feedCount = 0;
                                 virus.lastFeedAngle = undefined;
                             }
@@ -202,7 +218,6 @@ export const useGameState = () => {
                     (playerId) => {
                         otherPlayersMap.current.delete(playerId);
                         gameState.current.otherPlayers = Array.from(otherPlayersMap.current.values());
-                        // Remove their splits and ejected
                         gameState.current.otherPlayerSplits = gameState.current.otherPlayerSplits.filter(s => s.playerId !== playerId);
                         gameState.current.otherPlayerEjected = gameState.current.otherPlayerEjected.filter(e => e.playerId !== playerId);
                     },
@@ -232,26 +247,25 @@ export const useGameState = () => {
                         if (targetType === 'player') {
                             // Check if I was the one consumed
                             if (targetId === playerIdRef.current) {
-                                // I was eaten! Reset my player
-                                console.log('I was eaten! Respawning...');
-                                gameState.current.player.mass = START_MASS;
-                                gameState.current.player.radius = radiusFromMass(START_MASS);
-                                gameState.current.player.x = WORLD_SIZE / 2 + (Math.random() - 0.5) * 1000;
-                                gameState.current.player.y = WORLD_SIZE / 2 + (Math.random() - 0.5) * 1000;
-                                gameState.current.splits = [];
-                                gameState.current.ejected = [];
+                                console.log('I was eaten! Triggering death screen and reconnecting...');
+                                // Trigger death callback first
+                                if (onPlayerDeath) {
+                                    onPlayerDeath();
+                                }
+                                // Reconnect to get fresh player and clean state
+                                if (wsService.current) {
+                                    wsService.current.reconnect();
+                                }
                                 return;
                             }
                             
                             // Check if I was the consumer - update mass
                             if (consumerId === playerIdRef.current && newMass) {
                                 if (consumingEntityType === 'player' && consumingEntityId === 'main') {
-                                    // Update main player mass
                                     gameState.current.player.mass = newMass;
                                     gameState.current.player.radius = radiusFromMass(newMass);
                                     console.log(`Main player consumed player! Gained ${gainedMass} mass. New mass: ${newMass}`);
                                 } else if (consumingEntityType === 'split' && consumingEntityId) {
-                                    // Update specific split mass
                                     const split = gameState.current.splits.find(s => s.id === consumingEntityId);
                                     if (split) {
                                         split.mass = newMass;
@@ -263,19 +277,16 @@ export const useGameState = () => {
                             // Remove consumed player from otherPlayers
                             otherPlayersMap.current.delete(targetId);
                             gameState.current.otherPlayers = Array.from(otherPlayersMap.current.values());
-                            // Remove their splits and ejected
                             gameState.current.otherPlayerSplits = gameState.current.otherPlayerSplits.filter(s => s.playerId !== targetId);
                             gameState.current.otherPlayerEjected = gameState.current.otherPlayerEjected.filter(e => e.playerId !== targetId);
                         } else if (targetType === 'split') {
                             // Check if I was the consumer - update mass
                             if (consumerId === playerIdRef.current && newMass) {
                                 if (consumingEntityType === 'player' && consumingEntityId === 'main') {
-                                    // Update main player mass
                                     gameState.current.player.mass = newMass;
                                     gameState.current.player.radius = radiusFromMass(newMass);
                                     console.log(`Main player consumed split! Gained ${gainedMass} mass. New mass: ${newMass}`);
                                 } else if (consumingEntityType === 'split' && consumingEntityId) {
-                                    // Update specific split mass
                                     const split = gameState.current.splits.find(s => s.id === consumingEntityId);
                                     if (split) {
                                         split.mass = newMass;
@@ -294,12 +305,10 @@ export const useGameState = () => {
                         // Check if I was the consumer - update mass
                         if (consumerId === playerIdRef.current && newMass) {
                             if (consumingEntityType === 'player' && consumingEntityId === 'main') {
-                                // Update main player mass
                                 gameState.current.player.mass = newMass;
                                 gameState.current.player.radius = radiusFromMass(newMass);
                                 console.log(`Main player consumed ejected! Gained ${gainedMass} mass. New mass: ${newMass}`);
                             } else if (consumingEntityType === 'split' && consumingEntityId) {
-                                // Update specific split mass
                                 const split = gameState.current.splits.find(s => s.id === consumingEntityId);
                                 if (split) {
                                     split.mass = newMass;
@@ -310,7 +319,6 @@ export const useGameState = () => {
                         
                         // CRITICAL FIX: If I'm the original owner, clear my ejected array
                         if (originalOwnerId === playerIdRef.current) {
-                            // Clear all my ejected masses to prevent re-adding consumed ones
                             gameState.current.ejected = [];
                             console.log(`Cleared my ejected array because someone consumed my ejected mass`);
                         }
@@ -324,7 +332,7 @@ export const useGameState = () => {
                 );
             }, 100);
         }
-    }, []);
+    }, [onPlayerDeath, resetGameState]);
 
     const consumePellet = useCallback((pelletId: number) => {
         if (wsService.current) {
@@ -346,7 +354,6 @@ export const useGameState = () => {
 
     const consumePlayer = useCallback((targetId: string, targetType: 'player' | 'split', consumingEntityType?: 'player' | 'split', consumingEntityId?: string) => {
         if (wsService.current) {
-            // Get the consuming entity's position and mass for server validation
             let consumingEntity = null;
             if (consumingEntityType === 'player') {
                 consumingEntity = {
@@ -371,15 +378,12 @@ export const useGameState = () => {
 
     const consumeOtherEjected = useCallback((ejectedId: number, consumingEntityType?: 'player' | 'split', consumingEntityId?: string) => {
         if (wsService.current) {
-            // Check if this ejected mass has already been consumed
             if (consumedEjectedIds.current.has(ejectedId)) {
-                return; // Already consumed, don't send duplicate request
+                return;
             }
             
-            // Mark as consumed to prevent duplicate requests
             consumedEjectedIds.current.add(ejectedId);
             
-            // Get the consuming entity's position and mass for server validation
             let consumingEntity = null;
             if (consumingEntityType === 'player') {
                 consumingEntity = {
@@ -479,7 +483,6 @@ export const useGameState = () => {
 
         // Add other players' ejected (but not our own!)
         for (const ej of state.otherPlayerEjected) {
-            // Skip if this ejected mass belongs to our player
             if (playerIdRef.current && ej.playerId === playerIdRef.current) {
                 continue;
             }
@@ -497,7 +500,6 @@ export const useGameState = () => {
 
         // Add other players' splits (but not our own!)
         for (const split of state.otherPlayerSplits) {
-            // Skip if this split belongs to our player
             if (playerIdRef.current && split.playerId === playerIdRef.current) {
                 continue;
             }
@@ -543,8 +545,8 @@ export const useGameState = () => {
                 type: "split",
                 x: split.x,
                 y: split.y,
-                radius: radiusFromMass(split.mass),
-                mass: split.mass,
+                radius: radiusFromMass(split.visualMass), // NEW: Use visual mass for rendering
+                mass: split.visualMass, // NEW: Use visual mass for rendering
                 data: { ...split, color: state.player.color },
             });
         }
@@ -554,8 +556,8 @@ export const useGameState = () => {
             type: "player",
             x: state.player.x,
             y: state.player.y,
-            radius: state.player.radius,
-            mass: state.player.mass,
+            radius: state.player.radius, // Already calculated using visual mass in PlayerManager
+            mass: state.player.visualMass, // NEW: Use visual mass for rendering
             data: { color: state.player.color },
         });
 
@@ -584,6 +586,7 @@ export const useGameState = () => {
         consumeOtherEjected,
         sendPlayerUpdate,
         getMyPlayerId,
+        resetGame: resetGameState,
         getWorldSize: () => WORLD_SIZE,
         getGridSize: () => GRID_SIZE,
         getVirusExplodeThreshold: () => VIRUS_EXPLODE_THRESHOLD,

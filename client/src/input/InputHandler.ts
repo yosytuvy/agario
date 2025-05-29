@@ -23,6 +23,7 @@ export class InputHandler {
         // Eject from main player if big enough
         if (player.mass >= ejectThreshold) {
             player.mass -= ejectLoss;
+            // Don't update visualMass - let PlayerManager handle smooth shrinking
             const ang = baseAng + (Math.random() * 2 - 1) * EJECT_SPREAD;
             const px = player.x + Math.cos(ang) * (player.radius + pelletRadius);
             const py = player.y + Math.sin(ang) * (player.radius + pelletRadius);
@@ -44,6 +45,7 @@ export class InputHandler {
             const s = splits[i];
             if (s.mass >= ejectThreshold) {
                 s.mass -= ejectLoss;
+                // Don't update visualMass - let SplitBlobManager handle smooth shrinking
                 const ang = baseAng + (Math.random() * 2 - 1) * EJECT_SPREAD;
                 const sRadius = radiusFromMass(s.mass + ejectLoss); // Use original radius
                 const px = s.x + Math.cos(ang) * (sRadius + pelletRadius);
@@ -83,6 +85,7 @@ export class InputHandler {
         if (player.mass >= splitThreshold) {
             const half = player.mass / 2;
             player.mass = half;
+            // Don't update visualMass immediately - let PlayerManager handle smooth shrinking
             player.radius = radiusFromMass(half);
             const vx = Math.cos(baseAng) * splitSpeed;
             const vy = Math.sin(baseAng) * splitSpeed;
@@ -95,6 +98,7 @@ export class InputHandler {
                 vx,
                 vy,
                 mass: half,
+                visualMass: half, // NEW: Initialize visual mass to match actual mass
                 born: now,
                 mergeDelay,
             });
@@ -106,6 +110,7 @@ export class InputHandler {
             if (s.mass >= splitThreshold) {
                 const half = s.mass / 2;
                 s.mass = half; // Update the existing split blob
+                // Don't update visualMass immediately - let SplitBlobManager handle smooth shrinking
                 const vx = Math.cos(baseAng) * splitSpeed;
                 const vy = Math.sin(baseAng) * splitSpeed;
                 const mergeDelay = 30000 + 0.02333 * half * 1000;
@@ -117,6 +122,7 @@ export class InputHandler {
                     vx,
                     vy,
                     mass: half,
+                    visualMass: half, // NEW: Initialize visual mass to match actual mass
                     born: now,
                     mergeDelay,
                 });
