@@ -507,24 +507,16 @@ class GameService:
         consuming_entity_id: str,
     ) -> Optional[dict]:
         """Handle consuming a target split."""
-        # Handle both old integer IDs and new string IDs
-        target_split = None
+        # Find the split by ID (all splits should use string IDs now)
+        target_split = self.player_splits.get(target_id)
         
-        # First check if it's a string ID in our splits
-        if target_id in self.player_splits:
-            target_split = self.player_splits[target_id]
-            actual_split_id = target_id
-        else:
-            # Try to find by integer ID for backward compatibility
-            try:
-                target_split_id = int(target_id)
-                for split_id, split in self.player_splits.items():
-                    if hasattr(split, 'id') and isinstance(split.id, int) and split.id == target_split_id:
-                        target_split = split
-                        actual_split_id = split_id
-                        break
-            except ValueError:
-                pass
+        if not target_split:
+            # Try to find by matching the split's stored ID
+            for split_id, split in self.player_splits.items():
+                if str(split.id) == target_id:
+                    target_split = split
+                    target_id = split_id  # Use the key as the actual ID
+                    break
         
         if not target_split:
             return None
@@ -545,8 +537,9 @@ class GameService:
         else:
             new_mass = consuming_mass + gained_mass
 
-        # Remove the split
-        del self.player_splits[actual_split_id]
+        # Remove the split - use the correct key
+        if target_id in self.player_splits:
+            del self.player_splits[target_id]
 
         return {
             "targetId": target_id,
@@ -557,7 +550,6 @@ class GameService:
             "consumingEntityType": consuming_entity_type,
             "consumingEntityId": consuming_entity_id,
         }
-
     # Getter methods for game state
     def get_all_pellets(self) -> List[dict]:
         """Get all pellets as dictionaries."""

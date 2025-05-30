@@ -180,6 +180,8 @@ class WebSocketService:
 
     async def _handle_consume_player(self, player_id: str, data: dict):
         """Handle player consumption."""
+        print(f"Player {player_id} attempting to consume {data['targetType']} {data['targetId']}")
+        
         result = self.game_service.consume_player(
             player_id,
             data["targetId"],
@@ -190,8 +192,11 @@ class WebSocketService:
         )
 
         if result:
+            print(f"Consumption successful: {result}")
             message = {"type": "player_consumed", **result}
             await self._broadcast_message(message)
+        else:
+            print(f"Consumption failed for {data['targetType']} {data['targetId']}")
 
     async def _handle_consume_other_ejected(self, player_id: str, data: dict):
         """Handle consumption of other players' ejected mass."""

@@ -195,14 +195,22 @@ export class CollisionDetection {
 		}
 
 		// Check if main player can eat other players' splits
-		for (const otherSplit of otherPlayerSplits) {
+		for (let i = otherPlayerSplits.length - 1; i >= 0; i--) {
+			const otherSplit = otherPlayerSplits[i];
 			if (
 				otherSplit.playerId !== myPlayerId &&
-				player.mass >= otherSplit.mass * 1.1 // Use actual mass for logic
+				player.mass >= otherSplit.mass * 1.1
 			) {
 				const dist = distance(player.x, player.y, otherSplit.x, otherSplit.y);
-				if (dist < player.radius) { // Use visual radius for collision
+				const splitRadius = radiusFromMass(otherSplit.mass);
+				
+				// More precise collision check
+				if (dist < player.radius - splitRadius * 0.5) {
+					console.log(`Player consuming split: ${otherSplit.id}, distance: ${dist}, playerRadius: ${player.radius}`);
 					onPlayerConsume(otherSplit.id.toString(), 'split', 'player', 'main');
+					
+					// IMPORTANT: Remove the split immediately from the array to prevent double consumption
+					otherPlayerSplits.splice(i, 1);
 					return;
 				}
 			}

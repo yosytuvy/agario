@@ -58,8 +58,17 @@ const GameCanvas: React.FC = () => {
         getMergeSpeed,
         getDecayRate,
         getMyPlayerId,
+        consumedSplitsRef,
         resetGame
     } = useGameState(handlePlayerDeath);
+
+    const lerp = (start: number, end: number, t: number): number => {
+        return start + (end - start) * t;
+    };
+
+    const easeInOutQuad = (t: number): number => {
+        return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+    };
 
     // Generate random background offset for start screen
     useEffect(() => {
@@ -153,6 +162,8 @@ const GameCanvas: React.FC = () => {
             const dt = (ts - lastTs) / 1000;
             lastTs = ts;
             const nowTs = Date.now();
+
+            
 
             // PERFORMANCE FIX: Reduce update frequency when on start screen
             if (!gameStarted) {
@@ -257,6 +268,66 @@ const GameCanvas: React.FC = () => {
                 (ejectedId, consumingEntityType, consumingEntityId) => 
                     consumeOtherEjected(ejectedId, consumingEntityType, consumingEntityId)
             );
+
+            // Clear consumed entities tracking for this frame
+            if (typeof consumedSplitsRef !== 'undefined' && consumedSplitsRef.current) {
+                consumedSplitsRef.current.clear();
+            }
+
+            const interpolateOtherPlayers = (currentTime: number) => {
+                // Interpolate players
+                for (let i = 0; i < gameState.otherPlayers.length; i++) {
+                    const player = gameState.otherPlayers[i];
+                    
+                    // Skip if no target position
+                    if (player.targetX === undefined || player.targetY === undefined) {
+                        continue;
+                    }
+                    
+                    // Skip if no last update time
+                    if (!player.lastUpdateTime || !player.updateInterval) {
+                        player.x = player.targetX;
+                        player.y = player.targetY;
+                        continue;
+                    }
+                    
+                    const timeSinceUpdate = currentTime - player.lastUpdateTime;
+                    const lerpFactor = Math.min(timeSinceUpdate / Math.max(player.updateInterval, 50), 1.0);
+                    
+                    // Smooth interpolation using easing
+                    const easedFactor = easeInOutQuad(lerpFactor);
+                    
+                    player.x = lerp(player.x, player.targetX, easedFactor);
+                    player.y = lerp(player.y, player.targetY, easedFactor);
+                }
+                
+                // Interpolate splits - use index-based loop to handle removals
+                for (let i = gameState.otherPlayerSplits.length - 1; i >= 0; i--) {
+                    const split = gameState.otherPlayerSplits[i];
+                    
+                    if (!split) continue; // Skip if split was removed
+                    
+                    if (split.targetX === undefined || split.targetY === undefined) {
+                        continue;
+                    }
+                    
+                    if (!split.lastUpdateTime || !split.updateInterval) {
+                        split.x = split.targetX || split.x;
+                        split.y = split.targetY || split.y;
+                        continue;
+                    }
+                    
+                    const timeSinceUpdate = currentTime - split.lastUpdateTime;
+                    const lerpFactor = Math.min(timeSinceUpdate / Math.max(split.updateInterval, 50), 1.0);
+                    const easedFactor = easeInOutQuad(lerpFactor);
+                    
+                    split.x = lerp(split.x, split.targetX, easedFactor);
+                    split.y = lerp(split.y, split.targetY, easedFactor);
+                }
+            };
+
+            // Call the interpolation
+            interpolateOtherPlayers(nowTs);
 
             // Render all entities
             const allEntities = getAllEntities();

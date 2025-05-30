@@ -60,6 +60,7 @@ export const useGameState = (onPlayerDeath?: () => void) => {
     const otherPlayersMap = useRef<Map<string, OtherPlayer>>(new Map());
     const playerIdRef = useRef<string | null>(null);
     const consumedEjectedIds = useRef<Set<number>>(new Set());
+    const consumedSplitsRef = useRef<Set<string>>(new Set());
 
     const resetGameState = useCallback(() => {
         // Reset player to initial state
@@ -206,12 +207,29 @@ export const useGameState = (onPlayerDeath?: () => void) => {
                     // On other players received
                     (players) => {
                         otherPlayersMap.current.clear();
-                        players.forEach(p => otherPlayersMap.current.set(p.id, p));
+                        players.forEach(p => {
+                            const newPlayer = {
+                                ...p,
+                                targetX: p.x,
+                                targetY: p.y,
+                                lastUpdateTime: Date.now(),
+                                updateInterval: 50
+                            };
+                            otherPlayersMap.current.set(p.id, newPlayer);
+                        });
                         gameState.current.otherPlayers = Array.from(otherPlayersMap.current.values());
                     },
                     // On player joined
                     (player) => {
-                        otherPlayersMap.current.set(player.id, player);
+                        // Initialize with interpolation fields
+                        const newPlayer = {
+                            ...player,
+                            targetX: player.x,
+                            targetY: player.y,
+                            lastUpdateTime: Date.now(),
+                            updateInterval: 50
+                        };
+                        otherPlayersMap.current.set(player.id, newPlayer);
                         gameState.current.otherPlayers = Array.from(otherPlayersMap.current.values());
                     },
                     // On player left
@@ -224,9 +242,25 @@ export const useGameState = (onPlayerDeath?: () => void) => {
                     // On player update
                     (playerId, x, y, mass, radius, color) => {
                         const player = otherPlayersMap.current.get(playerId);
+                        const now = Date.now();
+                        
                         if (player) {
-                            player.x = x;
-                            player.y = y;
+                            // Store current position before updating
+                            const prevX = player.x;
+                            const prevY = player.y;
+                            
+                            // Update interpolation data
+                            player.targetX = x;
+                            player.targetY = y;
+                            player.lastUpdateTime = now;
+                            player.updateInterval = now - (player.lastUpdateTime || now);
+                            
+                            // If this is the first update, set position immediately
+                            if (player.updateInterval === 0 || player.updateInterval > 1000) {
+                                player.x = x;
+                                player.y = y;
+                            }
+                            
                             player.mass = mass;
                             player.radius = radius;
                             if (color) {
@@ -236,7 +270,16 @@ export const useGameState = (onPlayerDeath?: () => void) => {
                     },
                     // On other player splits
                     (splits) => {
-                        gameState.current.otherPlayerSplits = splits;
+                        // Initialize splits with interpolation data
+                        const splitsWithInterpolation = splits.map(split => ({
+                            ...split,
+                            targetX: split.x,
+                            targetY: split.y,
+                            lastUpdateTime: Date.now(),
+                            updateInterval: 50
+                        }));
+                        gameState.current.otherPlayerSplits = splitsWithInterpolation;
+                        console.log(`Received ${splits.length} other player splits`);
                     },
                     // On other player ejected
                     (ejected) => {
@@ -295,9 +338,14 @@ export const useGameState = (onPlayerDeath?: () => void) => {
                                 }
                             }
                             
-                            // Remove consumed split
-                            const splitId = parseInt(targetId);
-                            gameState.current.otherPlayerSplits = gameState.current.otherPlayerSplits.filter(s => s.id !== splitId);
+                            // FIX: Remove consumed split with proper type handling
+                            // Handle both string and number IDs
+                            gameState.current.otherPlayerSplits = gameState.current.otherPlayerSplits.filter(s => {
+                                // Compare both as strings to handle type mismatches
+                                return s.id.toString() !== targetId.toString();
+                            });
+                            
+                            console.log(`Removed split ${targetId}, remaining splits:`, gameState.current.otherPlayerSplits.length);
                         }
                     },
                     // On other ejected consumed
@@ -353,7 +401,15 @@ export const useGameState = (onPlayerDeath?: () => void) => {
     }, []);
 
     const consumePlayer = useCallback((targetId: string, targetType: 'player' | 'split', consumingEntityType?: 'player' | 'split', consumingEntityId?: string) => {
+        // Prevent double consumption
+        const consumedKey = `${targetType}-${targetId}`;
+        if (consumedSplitsRef.current.has(consumedKey)) {
+            return;
+        }
+        
         if (wsService.current) {
+            consumedSplitsRef.current.add(consumedKey);
+            
             let consumingEntity = null;
             if (consumingEntityType === 'player') {
                 consumingEntity = {
@@ -586,6 +642,7 @@ export const useGameState = (onPlayerDeath?: () => void) => {
         consumeOtherEjected,
         sendPlayerUpdate,
         getMyPlayerId,
+        consumedSplitsRef,
         resetGame: resetGameState,
         getWorldSize: () => WORLD_SIZE,
         getGridSize: () => GRID_SIZE,

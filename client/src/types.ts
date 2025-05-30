@@ -1,3 +1,34 @@
+export interface OtherPlayer {
+    id: string;
+    x: number;
+    y: number;
+    mass: number;
+    radius: number;
+    color: string;
+    // Add interpolation data
+    targetX?: number;  // Make these optional with ?
+    targetY?: number;
+    lastUpdateTime?: number;
+    updateInterval?: number;
+}
+
+export interface OtherPlayerSplit {
+    id: number;
+    playerId: string;
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+    mass: number;
+    born: number;
+    mergeDelay: number;
+    // Add interpolation data
+    targetX?: number;
+    targetY?: number;
+    lastUpdateTime?: number;
+    updateInterval?: number;
+}
+
 export interface Pellet {
     id: number; // Added id field for server tracking
     x: number;
